@@ -1,10 +1,12 @@
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
-    @State var showingSettingsPane: Bool = true
+    @State var viewModel = SettingsViewModel()
+    @State var showingSettingsPane: Bool = false
     
     var body: some View {
-        Text("MAIN UI")
+        TimerContainerView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .topTrailing) {
                 Button {
@@ -19,7 +21,79 @@ struct ContentView: View {
                 SettingsContainerView()
                     .presentationCornerRadius(24)
             }
+            .task {
+                await viewModel.setDefaults()
+                await viewModel.load()
+            }
+            .environment(viewModel)
         
+    }
+}
+
+enum UserTimingKey: String {
+    case focusDuration = "focusDuration"
+    case breakDuration = "breakDuration"
+    case workHours = "workHours"
+    case lunch = "lunch"
+}
+
+@MainActor @Observable
+class SettingsViewModel {
+    let defaults = UserDefaults.standard
+    
+    var loaded: Bool = false
+    
+    var focusDuration: Int?
+    var breakDuration: Int?
+    var workingHoursStart: Date?
+    var workingHoursEnd: Date?
+    var lunchStart: Date?
+    var lunchEnd: Date?
+
+    private let focusDurationDeafult: Int = 45
+    private let breakDurationDeafult: Int = 7
+    private let workingHoursStartDeafult: Double = Date.now.atTime(h: 9, m: 0, s: 0).timeIntervalSince1970
+    private let workingHoursEndDeafult: Double = Date.now.atTime(h: 17, m: 0, s: 0).timeIntervalSince1970
+    private let lunchStartDeafult: Double = Date.now.atTime(h: 13, m: 0, s: 0).timeIntervalSince1970
+    private let lunchEndDeafult: Double = Date.now.atTime(h: 14, m: 0, s: 0).timeIntervalSince1970
+    
+    func load() async {
+        focusDuration = defaults.integer(forKey: UserTimingKey.focusDuration.rawValue)
+        breakDuration = defaults.integer(forKey: UserTimingKey.breakDuration.rawValue)
+        
+        workingHoursStart = Date(timeIntervalSince1970: defaults.double(forKey: UserTimingKey.workHours.rawValue + "Start"))
+        workingHoursEnd = Date(timeIntervalSince1970: defaults.double(forKey: UserTimingKey.workHours.rawValue + "End"))
+        
+        lunchStart = Date(timeIntervalSince1970: defaults.double(forKey: UserTimingKey.lunch.rawValue + "Start"))
+        lunchEnd = Date(timeIntervalSince1970: defaults.double(forKey: UserTimingKey.lunch.rawValue + "End"))
+        
+        loaded = true
+    }
+    
+    func save() async {
+        defaults.setValue(self.focusDuration!, forKey: UserTimingKey.focusDuration.rawValue)
+        defaults.setValue(self.breakDuration!, forKey: UserTimingKey.breakDuration.rawValue)
+        
+        defaults.setValue(self.workingHoursStart!.timeIntervalSince1970, forKey: UserTimingKey.workHours.rawValue + "Start")
+        defaults.setValue(self.workingHoursEnd!.timeIntervalSince1970, forKey: UserTimingKey.workHours.rawValue + "End")
+        
+        defaults.setValue(self.lunchStart!.timeIntervalSince1970, forKey: UserTimingKey.lunch.rawValue + "Start")
+        defaults.setValue(self.lunchEnd!.timeIntervalSince1970, forKey: UserTimingKey.lunch.rawValue + "End")
+    }
+    
+    func setDefaults() async {
+        guard !defaults.bool(forKey: "FIRST_SETUP_DONE") else { return }
+        
+        defaults.setValue(self.focusDurationDeafult, forKey: UserTimingKey.focusDuration.rawValue)
+        defaults.setValue(self.breakDurationDeafult, forKey: UserTimingKey.breakDuration.rawValue)
+        
+        defaults.setValue(self.workingHoursStartDeafult, forKey: UserTimingKey.workHours.rawValue + "Start")
+        defaults.setValue(self.workingHoursEndDeafult, forKey: UserTimingKey.workHours.rawValue + "End")
+        
+        defaults.setValue(self.lunchStartDeafult, forKey: UserTimingKey.lunch.rawValue + "Start")
+        defaults.setValue(self.lunchEndDeafult, forKey: UserTimingKey.lunch.rawValue + "End")
+        
+        defaults.setValue(true, forKey: "FIRST_SETUP_DONE")
     }
 }
 
@@ -44,11 +118,10 @@ struct SettingsListView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                DurationPickerSettingView("Focus Duration", default: 45)
-                DurationPickerSettingView("Break Duration", default: 7)
-                StartEndPickerSettingView("Work Hours")
-                StartEndPickerSettingView("Lunch", start: Date.now.atTime(h: 13, m: 0, s: 0), end: Date.now.atTime(h: 14, m: 0, s: 0))
-//                ToggleSettingView("Break before meetings?")
+                FocusDurationPickerSettingView()
+                BreakDurationPickerSettingView()
+                WorkHoursPickerSettingView()
+                LunchPickerSettingView()
             }
             .padding(16)
         }
@@ -65,83 +138,3 @@ extension View {
 }
 
 
-struct DurationPickerSettingView: View {
-    let title: String
-    
-    @State var minutes: Int
-    
-    init(_ title: String, default defaultVal: Int) {
-        self.title = title
-        
-        self._minutes = State(initialValue: defaultVal)
-    }
-    
-    var body: some View {
-        VStack {
-            Text(title)
-                .focusTimeHeadingStyle()
-            
-            VStack {
-                Stepper("**\(minutes)** Minutes", value: $minutes)
-                    .padding(.leading, 18)
-                    .padding(.trailing, 12)
-            }
-            .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 24)
-                    .foregroundStyle(.ultraThinMaterial)
-            }
-            .padding(.horizontal, 24)
-        }
-    }
-}
-
-struct StartEndPickerSettingView: View {
-    let title: String
-    
-    @State var startDate: Date
-    @State var endDate: Date
-    
-    init(_ title: String, start: Date = Date.now.atTime(h: 9, m: 0, s: 0), end: Date = Date.now.atTime(h: 17, m: 0, s: 0)) {
-        self.title = title
-        
-        self._startDate = State(initialValue: start)
-        self._endDate = State(initialValue: end)
-    }
-    
-    var body: some View {
-        VStack {
-            Text(title)
-                .focusTimeHeadingStyle()
-            
-            VStack {
-                DatePicker("Start", selection: $startDate, displayedComponents: [.hourAndMinute])
-                    .padding(.leading, 18)
-                    .padding(.trailing, 12)
-                Divider()
-                DatePicker("End", selection: $endDate, displayedComponents: [.hourAndMinute])
-                    .padding(.leading, 18)
-                    .padding(.trailing, 12)
-            }
-            .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 24)
-                    .foregroundStyle(.ultraThinMaterial)
-            }
-            .padding(.horizontal, 24)
-        }
-    }
-}
-
-struct ToggleSettingView: View {
-    let title: String
-    
-    init(_ title: String) {
-        self.title = title
-    }
-    
-    var body: some View {
-        Text(title)
-            .focusTimeHeadingStyle()
-    }
-}
